@@ -1,23 +1,183 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Bookmark, ChevronLeft, ChevronRight, Clapperboard, Clock3, Film, Heart, LoaderCircle, Search, SlidersHorizontal, Star, X } from 'lucide-react';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Bookmark, Check, ChevronLeft, ChevronRight, Clapperboard, Clock3, Film, Heart, LoaderCircle, LockKeyhole, Mail, Search, SlidersHorizontal, Star, UserRound, X } from 'lucide-react';
+import type { Session } from '@supabase/supabase-js';
 import { getGenres, getImageUrl, getMovie, getMovies, type Genre, type Movie } from '@/lib/tmdb';
+import { supabase } from '@/lib/supabase';
 
 const FALLBACK_YEAR = new Date().getFullYear();
 const posterFallback = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80';
 
 function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(supabase));
+  const [authError, setAuthError] = useState('');
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let active = true;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setAuthError(error.message);
+      setSession(data.session);
+      setAuthLoading(false);
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      setAuthError(reason instanceof Error ? reason.message : 'We couldn’t verify your account. Please try again.');
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthLoading(false);
+      setAuthError('');
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   return (
     <Routes>
-      <Route path="*" element={<Shell />} />
+      <Route path="/auth" element={
+        authLoading
+          ? <AuthLoading />
+          : session
+            ? <Navigate to="/" replace />
+            : <AuthPage initialError={authError} />
+      } />
+      <Route path="*" element={
+        authLoading
+          ? <AuthLoading />
+          : session
+            ? <Shell session={session} />
+            : <RequireAuth />
+      } />
     </Routes>
   );
 }
 
-function Shell() {
+function RequireAuth() {
+  const location = useLocation();
+  return <Navigate to="/auth" replace state={{ from: location }} />;
+}
+
+function AuthLoading() {
+  return <div className="auth-loading" role="status"><LoaderCircle className="spin" size={30} /><span>Getting your cinema ready…</span></div>;
+}
+
+function AuthPage({ initialError }: { initialError: string }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [mode, setMode] = useState<'signup' | 'login'>('signup');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(initialError);
+  const [notice, setNotice] = useState('');
+  const destination = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/';
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) {
+      setError('Account access is not configured. Add the Supabase URL and anon key to your environment settings.');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (mode === 'signup') {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { full_name: name.trim() } },
+        });
+        if (signUpError) throw signUpError;
+        if (data.session) {
+          const { error: signOutError } = await supabase.auth.signOut();
+          if (signOutError) throw signOutError;
+        }
+        setMode('login');
+        setPassword('');
+        setNotice(data.session
+          ? 'Your account is ready. Sign in with your new details to continue.'
+          : 'Your account was created. Check your email to confirm it, then sign in.');
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (signInError) throw signInError;
+        navigate(destination, { replace: true });
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'We couldn’t complete that request. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function changeMode(nextMode: 'signup' | 'login') {
+    setMode(nextMode);
+    setError('');
+    setNotice('');
+  }
+
+  return (
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-panel">
+          <Link className="brand auth-brand" to="/auth">
+            <span className="brand-mark"><Clapperboard size={19} strokeWidth={2.5} /></span>
+            <span>Cine<span>mate</span></span>
+          </Link>
+          <div className="auth-intro">
+            <p className="eyebrow"><span className="eyebrow-line" /> A little more movie magic</p>
+            <h1>{mode === 'signup' ? <>Your next favorite<br /><em>starts here.</em></> : <>Welcome back,<br /><em>movie lover.</em></>}</h1>
+            <p>{mode === 'signup' ? 'Create your free account to explore films and build a watchlist that feels like yours.' : 'Sign in to pick up where you left off and get back to finding your next favorite film.'}</p>
+          </div>
+          <div className="auth-perks">
+            <div><span className="perk-icon"><Search size={17} /></span><span><strong>Find your next favorite</strong><small>Explore films picked for every mood.</small></span></div>
+            <div><span className="perk-icon"><Bookmark size={17} /></span><span><strong>Keep your watchlist close</strong><small>Save the films you can’t wait to see.</small></span></div>
+          </div>
+          <div className="auth-decoration" aria-hidden="true"><div className="auth-reel"><Film size={34} /></div><div className="auth-orbit" /></div>
+          <span className="auth-footnote">MADE FOR MOVIE PEOPLE</span>
+        </div>
+        <div className="auth-form-panel">
+          <div className="auth-mobile-brand">
+            <span className="brand-mark"><Clapperboard size={19} strokeWidth={2.5} /></span>
+            <span>Cine<span>mate</span></span>
+          </div>
+          <div className="auth-form-heading">
+            <p className="eyebrow">{mode === 'signup' ? 'Join the club' : 'Your account'}</p>
+            <h2>{mode === 'signup' ? 'Create your account' : 'Sign in to Cinemate'}</h2>
+            <p>{mode === 'signup' ? 'It only takes a moment to get started.' : 'Good to have you back.'}</p>
+          </div>
+          <form className="auth-form" onSubmit={submit}>
+            {mode === 'signup' && <label className="auth-field"><span>Your name</span><div><UserRound size={17} /><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex Morgan" required /></div></label>}
+            <label className="auth-field"><span>Email address</span><div><Mail size={17} /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></div></label>
+            <label className="auth-field"><span>Password</span><div><LockKeyhole size={17} /><input type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required /></div></label>
+            {error && <p className="auth-message auth-error" role="alert">{error}</p>}
+            {notice && <p className="auth-message auth-notice" role="status"><Check size={17} />{notice}</p>}
+            {!supabase && <p className="auth-setup-note">To enable accounts, configure <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.</p>}
+            <button className="auth-submit" type="submit" disabled={busy || !supabase}>{busy ? <><LoaderCircle className="spin" size={17} /> Please wait…</> : mode === 'signup' ? 'Create account' : 'Sign in'}<ChevronRight size={17} /></button>
+          </form>
+          <p className="auth-switch">{mode === 'signup' ? 'Already have an account?' : 'New to Cinemate?'} <button type="button" onClick={() => changeMode(mode === 'signup' ? 'login' : 'signup')}>{mode === 'signup' ? 'Sign in' : 'Create an account'}</button></p>
+          <p className="auth-legal">By continuing, you agree to enjoy great movies responsibly.</p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function Shell({ session }: { session: Session }) {
   const location = useLocation();
   const favorites = readFavorites();
   const [favoriteIds, setFavoriteIds] = useState<number[]>(favorites);
+  const [signOutError, setSignOutError] = useState('');
 
   function toggleFavorite(id: number) {
     setFavoriteIds((current) => {
@@ -25,6 +185,12 @@ function Shell() {
       localStorage.setItem('cinema-favorites', JSON.stringify(next));
       return next;
     });
+  }
+
+  async function signOut() {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) setSignOutError(error.message);
   }
 
   return (
@@ -38,8 +204,9 @@ function Shell() {
           <Link className={location.pathname === '/' ? 'active' : ''} to="/">Discover</Link>
           <Link className={location.pathname === '/favorites' ? 'active' : ''} to="/favorites">My List <span className="nav-count">{favoriteIds.length}</span></Link>
         </nav>
-        <div className="header-badge"><span className="status-dot" /> Curated for you</div>
+        <div className="header-account"><span className="header-badge"><span className="status-dot" /> Curated for you</span><span className="account-email">{session.user.email}</span><button className="sign-out-button" onClick={signOut}>Sign out</button></div>
       </header>
+      {signOutError && <p className="sign-out-error" role="alert">{signOutError}</p>}
       <main>
         <Routes>
           <Route path="/" element={<DiscoverPage favoriteIds={favoriteIds} onToggleFavorite={toggleFavorite} />} />
