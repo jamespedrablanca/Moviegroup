@@ -156,6 +156,7 @@ function AuthPage({ initialError }: { initialError: string }) {
             <h2>{mode === 'signup' ? 'Create your account' : 'Sign in to Cinemate'}</h2>
             <p>{mode === 'signup' ? 'It only takes a moment to get started.' : 'Good to have you back.'}</p>
           </div>
+          {mode === 'signup' && <div className="auth-highlights" aria-label="Cinemate account benefits"><span><Bookmark size={14} />Personal watchlist</span><span><Search size={14} />Discover new films</span></div>}
           <form className="auth-form" onSubmit={submit}>
             {mode === 'signup' && <label className="auth-field"><span>Your name</span><div><UserRound size={17} /><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex Morgan" required /></div></label>}
             <label className="auth-field"><span>Email address</span><div><Mail size={17} /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></div></label>
