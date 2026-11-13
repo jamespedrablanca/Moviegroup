@@ -1176,20 +1176,6 @@ a {
   margin-top: 1px;
 }
 
-.auth-setup-note {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(216, 93, 61, 0.08);
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.6;
-}
-
-.auth-setup-note code {
-  color: var(--accent-strong);
-}
-
 .auth-switch {
   margin: 22px 0 0;
   text-align: center;

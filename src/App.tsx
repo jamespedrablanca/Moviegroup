@@ -1,59 +1,50 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Bookmark, Check, ChevronLeft, ChevronRight, Clapperboard, Clock3, Film, Heart, LoaderCircle, LockKeyhole, Mail, Search, SlidersHorizontal, Star, UserRound, X } from 'lucide-react';
-import type { Session } from '@supabase/supabase-js';
 import { getGenres, getImageUrl, getMovie, getMovies, type Genre, type Movie } from '@/lib/tmdb';
-import { supabase } from '@/lib/supabase';
+import { createAccount, getCurrentUser, signIn, signOut, type AuthUser } from '@/lib/auth';
 
 const FALLBACK_YEAR = new Date().getFullYear();
 const posterFallback = 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=600&q=80';
 
 function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [authLoading, setAuthLoading] = useState(Boolean(supabase));
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState('');
 
   useEffect(() => {
-    if (!supabase) return;
-
     let active = true;
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!active) return;
-      if (error) setAuthError(error.message);
-      setSession(data.session);
-      setAuthLoading(false);
-    }).catch((reason: unknown) => {
-      if (!active) return;
-      setAuthError(reason instanceof Error ? reason.message : 'We couldn’t verify your account. Please try again.');
-      setAuthLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setAuthLoading(false);
-      setAuthError('');
-    });
+    getCurrentUser()
+      .then((currentUser) => { if (active) setUser(currentUser); })
+      .catch((reason: unknown) => {
+        if (active) setAuthError(reason instanceof Error ? reason.message : 'We couldn’t verify your account. Please try again.');
+      })
+      .finally(() => { if (active) setAuthLoading(false); });
 
     return () => {
       active = false;
-      subscription.unsubscribe();
     };
   }, []);
+
+  async function handleSignOut() {
+    await signOut();
+    setUser(null);
+  }
 
   return (
     <Routes>
       <Route path="/auth" element={
         authLoading
           ? <AuthLoading />
-          : session
+          : user
             ? <Navigate to="/" replace />
-            : <AuthPage initialError={authError} />
+            : <AuthPage initialError={authError} onSignedIn={setUser} />
       } />
       <Route path="*" element={
         authLoading
           ? <AuthLoading />
-          : session
-            ? <Shell session={session} />
+          : user
+            ? <Shell user={user} onSignOut={handleSignOut} />
             : <RequireAuth />
       } />
     </Routes>
@@ -69,7 +60,7 @@ function AuthLoading() {
   return <div className="auth-loading" role="status"><LoaderCircle className="spin" size={30} /><span>Getting your cinema ready…</span></div>;
 }
 
-function AuthPage({ initialError }: { initialError: string }) {
+function AuthPage({ initialError, onSignedIn }: { initialError: string; onSignedIn: (user: AuthUser) => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'signup' | 'login'>('signup');
@@ -83,34 +74,18 @@ function AuthPage({ initialError }: { initialError: string }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase) {
-      setError('Account access is not configured. Add the Supabase URL and anon key to your environment settings.');
-      return;
-    }
-
     setBusy(true);
     setError('');
     setNotice('');
     try {
       if (mode === 'signup') {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { data: { full_name: name.trim() } },
-        });
-        if (signUpError) throw signUpError;
-        if (data.session) {
-          const { error: signOutError } = await supabase.auth.signOut();
-          if (signOutError) throw signOutError;
-        }
+        await createAccount(name.trim(), email.trim(), password);
         setMode('login');
         setPassword('');
-        setNotice(data.session
-          ? 'Your account is ready. Sign in with your new details to continue.'
-          : 'Your account was created. Check your email to confirm it, then sign in.');
+        setNotice('Your account was created. Sign in with your new details to continue.');
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (signInError) throw signInError;
+        const authenticatedUser = await signIn(email.trim(), password);
+        onSignedIn(authenticatedUser);
         navigate(destination, { replace: true });
       }
     } catch (reason) {
@@ -158,13 +133,12 @@ function AuthPage({ initialError }: { initialError: string }) {
           </div>
           {mode === 'signup' && <div className="auth-highlights" aria-label="Cinemate account benefits"><span><Bookmark size={14} />Personal watchlist</span><span><Search size={14} />Discover new films</span></div>}
           <form className="auth-form" onSubmit={submit}>
-            {mode === 'signup' && <label className="auth-field"><span>Your name</span><div><UserRound size={17} /><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex Morgan" required /></div></label>}
-            <label className="auth-field"><span>Email address</span><div><Mail size={17} /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></div></label>
-            <label className="auth-field"><span>Password</span><div><LockKeyhole size={17} /><input type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" minLength={6} required /></div></label>
+            {mode === 'signup' && <label className="auth-field"><span>Your name</span><div><UserRound size={17} /><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Alex Morgan" maxLength={100} required /></div></label>}
+            <label className="auth-field"><span>Email address</span><div><Mail size={17} /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" maxLength={190} required /></div></label>
+            <label className="auth-field"><span>Password</span><div><LockKeyhole size={17} /><input type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" minLength={mode === 'signup' ? 8 : undefined} maxLength={72} required /></div></label>
             {error && <p className="auth-message auth-error" role="alert">{error}</p>}
             {notice && <p className="auth-message auth-notice" role="status"><Check size={17} />{notice}</p>}
-            {!supabase && <p className="auth-setup-note">To enable accounts, configure <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.</p>}
-            <button className="auth-submit" type="submit" disabled={busy || !supabase}>{busy ? <><LoaderCircle className="spin" size={17} /> Please wait…</> : mode === 'signup' ? 'Create account' : 'Sign in'}<ChevronRight size={17} /></button>
+            <button className="auth-submit" type="submit" disabled={busy}>{busy ? <><LoaderCircle className="spin" size={17} /> Please wait…</> : mode === 'signup' ? 'Create account' : 'Sign in'}<ChevronRight size={17} /></button>
           </form>
           <p className="auth-switch">{mode === 'signup' ? 'Already have an account?' : 'New to Cinemate?'} <button type="button" onClick={() => changeMode(mode === 'signup' ? 'login' : 'signup')}>{mode === 'signup' ? 'Sign in' : 'Create an account'}</button></p>
           <p className="auth-legal">By continuing, you agree to enjoy great movies responsibly.</p>
@@ -174,7 +148,7 @@ function AuthPage({ initialError }: { initialError: string }) {
   );
 }
 
-function Shell({ session }: { session: Session }) {
+function Shell({ user, onSignOut }: { user: AuthUser; onSignOut: () => Promise<void> }) {
   const location = useLocation();
   const favorites = readFavorites();
   const [favoriteIds, setFavoriteIds] = useState<number[]>(favorites);
@@ -189,9 +163,12 @@ function Shell({ session }: { session: Session }) {
   }
 
   async function signOut() {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
-    if (error) setSignOutError(error.message);
+    setSignOutError('');
+    try {
+      await onSignOut();
+    } catch (reason) {
+      setSignOutError(reason instanceof Error ? reason.message : 'We couldn’t sign you out. Please try again.');
+    }
   }
 
   return (
@@ -205,7 +182,7 @@ function Shell({ session }: { session: Session }) {
           <Link className={location.pathname === '/' ? 'active' : ''} to="/">Discover</Link>
           <Link className={location.pathname === '/favorites' ? 'active' : ''} to="/favorites">My List <span className="nav-count">{favoriteIds.length}</span></Link>
         </nav>
-        <div className="header-account"><span className="header-badge"><span className="status-dot" /> Curated for you</span><span className="account-email">{session.user.email}</span><button className="sign-out-button" onClick={signOut}>Sign out</button></div>
+        <div className="header-account"><span className="header-badge"><span className="status-dot" /> Curated for you</span><span className="account-email">{user.email}</span><button className="sign-out-button" onClick={signOut}>Sign out</button></div>
       </header>
       {signOutError && <p className="sign-out-error" role="alert">{signOutError}</p>}
       <main>

@@ -1,18 +1,18 @@
 # Cinemate
 
-Cinemate is a client-side React single-page application for discovering movies. It fetches live movie data from [The Movie Database (TMDB)](https://developer.themoviedb.org/docs), and uses Supabase Auth to require account creation and sign-in before the movie catalog can be accessed.
+Cinemate is a React single-page application for discovering movies. It fetches live movie data from [The Movie Database (TMDB)](https://developer.themoviedb.org/docs) and stores user accounts in a local MySQL database through a small PHP API.
 
 ## Features
 
 - Discover popular movies, search by title, filter by genre and year, sort by popularity/rating/release date, and navigate result pages.
 - Open a movie details page with its synopsis, genres, rating, runtime, and release year.
 - Save and remove favorites; the watchlist persists across reloads using `localStorage`.
-- Create an account and sign in with email/password. A Supabase email-confirmation flow is supported when enabled.
+- Create an account and sign in with email/password; passwords are stored as secure hashes in MySQL.
 - Responsive layouts, loading states, and recoverable error and empty states.
 
 ## React application
 
-The application uses functional React components and React Router. Reusable UI such as movie cards, grids, pagination, loading states, and movie-detail views is implemented in `src/App.tsx`. TMDB request and response handling is centralized in `src/lib/tmdb.ts`; Supabase Auth client configuration is in `src/lib/supabase.ts`.
+The application uses functional React components and React Router. Reusable UI such as movie cards, grids, pagination, loading states, and movie-detail views is implemented in `src/App.tsx`. TMDB request handling is in `src/lib/tmdb.ts`; account requests are in `src/lib/auth.ts` and handled by the PHP API in `api/auth.php`.
 
 | Route | View |
 | --- | --- |
@@ -21,12 +21,12 @@ The application uses functional React components and React Router. Reusable UI s
 | `/movie/:id` | Movie details |
 | `/favorites` | Saved watchlist |
 
-All movie routes require an authenticated Supabase session. Movie and genre data are fetched asynchronously from TMDB; the interface shows loading, error, and empty states while handling the responses.
+All movie routes require an authenticated PHP session. Movie and genre data are fetched asynchronously from TMDB; the interface shows loading, error, and empty states while handling the responses.
 
 ## External APIs
 
 - **TMDB REST API** — movie discovery (`/discover/movie`), title search (`/search/movie`), genre list (`/genre/movie/list`), and movie details (`/movie/{id}`). Requires a TMDB API key.
-- **Supabase Auth** — email/password account creation, email confirmation when configured, sign-in, session persistence, and sign-out.
+- **Local MySQL** — account names, unique email addresses, password hashes, and account creation dates. PHP manages registration, sign-in, and HTTP-only session cookies.
 
 ## Setup
 
@@ -36,22 +36,23 @@ All movie routes require an authenticated Supabase session. Movie and genre data
    npm install
    ```
 
-2. Create a Supabase project and enable email/password authentication.
-3. Create `.env.local` in the project root:
+2. Start **Apache** and **MySQL** from the XAMPP Control Panel.
+3. Import `api/database.sql` in phpMyAdmin (usually `http://localhost/phpmyadmin`). This creates the `cinemate_db` database and `accounts` table.
+4. In `.env.local`, configure the TMDB API key:
 
    ```env
    VITE_TMDB_API_KEY=your_tmdb_api_key
-   VITE_SUPABASE_URL=https://your-project.supabase.co
-   VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
    ```
 
-4. Start the development server:
+   Cinemate uses XAMPP's local MySQL defaults (`root` with an empty password). If your MySQL credentials differ, set `CINEMATE_DB_HOST`, `CINEMATE_DB_NAME`, `CINEMATE_DB_USER`, and `CINEMATE_DB_PASSWORD` in the Apache environment or adjust the local values in `api/config.php`.
+
+5. Start the Vite development server:
 
    ```sh
    npm run dev
    ```
 
-New users create an account on the signup page. If email confirmation is enabled in Supabase, confirm the email before signing in. The Supabase anon key is intended for frontend use; never expose a service-role key in the client.
+New users create an account on the signup page, then sign in. The Vite development server proxies `/Moviegroup/api` to XAMPP's Apache server. Keep this local development database private; a production deployment needs properly managed database credentials, HTTPS, and additional operational protections.
 
 ## GitHub collaboration
 

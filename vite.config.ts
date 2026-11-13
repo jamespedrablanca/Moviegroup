@@ -13,4 +13,12 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
+  server: {
+    proxy: {
+      '/Moviegroup/api': {
+        target: 'http://127.0.0.1',
+        changeOrigin: true,
+      },
+    },
+  },
 });
